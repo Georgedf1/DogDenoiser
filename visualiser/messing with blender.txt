@@ -1,0 +1,1 @@
+Seems a UV sphere with 4 by 4 scale 0.125 is a decent marker sphere with low face number
