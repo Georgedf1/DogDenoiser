@@ -41,18 +41,24 @@ def plot(positions,frame,plot_pad=0.1):
 
 class AnimatePlot():
 
+    def __init___(self):
+        #For plotting pos1 and pos2 side by side via an offset
+        self.plot_offset = [1000,0,0]
+
     #Assumes the input data hasnt been 'corrected' so is in Z,X,Y format
 
     #NB: There the code plots a point at the origin for some reason.
     #Most likely is to do with the plot initialisation. Darren's bvhDraw above doesnt do it somehow
     #Although this is no problem for a local plot!
     
-    def animated_plot(self,pos1,pos2=np.array([None]),fps=120,plot_pad=0,fit_plot=False,to_scale=True):
+    def animated_plot(self,pos1,pos2=np.array([None]),fps=120, offset=False, plot_pad=0,fit_plot=False,to_scale=True):
 
         '''
         Takes pos1 argument as position of array with shape (frame_num,obj_num,3)
         Optional pos2 argument plots in a different colour
         '''
+        if offset: #offset pos2
+            pos2[:,:] += self.plot_offset
 
         frametime = 1/fps
         frame_num = pos1.shape[0]
