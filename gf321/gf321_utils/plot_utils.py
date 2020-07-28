@@ -1,4 +1,3 @@
-# gf321
 
 import numpy as np
 from mpl_toolkits import mplot3d
@@ -39,11 +38,7 @@ def plot(positions,frame,plot_pad=0.1):
 
 ######################
 
-class AnimatePlot():
-
-    def __init___(self):
-        #For plotting pos1 and pos2 side by side via an offset
-        self.plot_offset = [1000,0,0]
+class AnimatePlot():  
 
     #Assumes the input data hasnt been 'corrected' so is in Z,X,Y format
 
@@ -51,14 +46,21 @@ class AnimatePlot():
     #Most likely is to do with the plot initialisation. Darren's bvhDraw above doesnt do it somehow
     #Although this is no problem for a local plot!
     
-    def animated_plot(self,pos1,pos2=np.array([None]),fps=120, offset=False, plot_pad=0,fit_plot=False,to_scale=True):
+    def animated_plot(self,pos1,pos_two=np.array([None]),fps=120, offset=False,
+                 offset_vals=[1000,0,0], plot_pad=0,fit_plot=False,to_scale=False):
 
         '''
         Takes pos1 argument as position of array with shape (frame_num,obj_num,3)
         Optional pos2 argument plots in a different colour
+
+        NB Warning about fit_plot=True, can create lag if plotting noise
+            or arrays with rapidly changing maxima/minima
         '''
-        if offset: #offset pos2
-            pos2[:,:] += self.plot_offset
+        if offset: #offset pos2 by offset_vals argument
+            pos2 = np.array(pos_two, copy=True)
+            pos2[:,:] += offset_vals
+        else:
+            pos2 = pos_two
 
         frametime = 1/fps
         frame_num = pos1.shape[0]
