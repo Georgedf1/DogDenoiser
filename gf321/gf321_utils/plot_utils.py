@@ -6,12 +6,12 @@ import matplotlib.animation as animation
 
 ######################
 
-def plot(positions,frame,plot_pad=0.1):
+def plot(positions,frame,plot_pad=0.1,to_scale=True):
     '''
     Input positions has to be of shape (frame_num,marker_num/joint_num,3)
     plot_pad pads out the plot with empty space for viewability
     '''
-    
+
     #reshape flattened markers
     if len(positions.shape) ==2:
         positions = positions.reshape((positions.shape[0],int(positions.shape[1]/3),3))
@@ -24,8 +24,6 @@ def plot(positions,frame,plot_pad=0.1):
     minZ = positions[frame,:,1].min()
     maxZ = positions[frame,:,1].max()
     
-    print('minmaxs are: ',minX,maxX,minY,maxY,minZ,maxZ)
-    
     p = plot_pad*(maxZ-minZ) #pad a little bit according to Z
     
     fig = plt.figure()
@@ -33,6 +31,18 @@ def plot(positions,frame,plot_pad=0.1):
                 xlim=(minX-p, maxX+p), ylim=(minY-p, maxY+p), zLim=(minZ-p, maxZ+p))
     
     plt.xlabel('x'); plt.ylabel('y')
+
+    if to_scale:
+        averages = np.mean(positions[frame], axis=0)
+
+        width = max(abs(maxX - averages[0]), abs(minX - averages[0]),  
+                abs(maxY - averages[2]), abs(minY - averages[2]), 
+                abs(maxZ - averages[1]), abs(minZ - averages[1]) )
+
+        ax.set_xlim(averages[0]-width-p,  averages[0]+width+p)
+        ax.set_ylim(averages[2]-width-p, averages[2]+width+p)
+        ax.set_zlim(averages[1]-width-p, averages[1]+width+p)
+        
 
     ax.plot3D(positions[frame,:,0],positions[frame,:,2],positions[frame,:,1],'bo',markersize=3.5)
 

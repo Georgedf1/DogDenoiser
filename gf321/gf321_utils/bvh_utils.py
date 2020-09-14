@@ -18,11 +18,12 @@ class Node:
         self.name = "Joint Name"
         self.transMats = []  # Transformation matrices
         self.jointCoords = []  # Joint coordiantes
+        self.first_frame_neutral = True #Not currently utilised in code
 
 
 class BVHData:
 
-    def __init__(self, bvhFileName='Empty', is_first_frame_neutral=True):
+    def __init__(self, bvhFileName='Empty'):
         self.root = Node()
         self.lineIter = 0
         self.allLines = []
@@ -37,7 +38,6 @@ class BVHData:
         self.plotMinMax = []
         self.jointPlots = []
         self.bonePlots = []
-        self.first_frame_neutral = is_first_frame_neutral
 
     def bvhRead(self, bvhFileName):
         '''
@@ -48,6 +48,8 @@ class BVHData:
 
         '''
         print('Reading BVH File..', bvhFileName)
+
+        
 
         bvhFile = open(bvhFileName)
 
@@ -79,10 +81,12 @@ class BVHData:
         motionIter += 1  # move to first line of motion
         line = self.allLines[motionIter].split()
 
+        ''' #This code is probably defunct (causes issues with joint angle plots due to lack of use of neutral frame)
         if self.first_frame_neutral:  # if first frame of bvh file is neutral pose, otherwise first line of motion is actual mocap
             self.firstFrame = np.array(line)
             motionIter += 1  # move to first frame of actual mocap
             self.totalFrames -= 1  # ignore first neutral frame
+        '''
 
         # Initialise a np array of zeros for the motion data so we can slice it
         # nicely later when reading the hierarchy and add it to each node on the fly
@@ -488,7 +492,7 @@ class BVHData:
     
     ################### gf321 functions ##################
 
-    def getJointAngles(self, withJoints=True, withPos=True, withNames=False):
+    def getJointAngles(self, withJoints=True, withPos=True, withNames=False, get_neutral_frame=False):
         '''
         Can only use once data has been read using self.bvhRead
 
@@ -519,12 +523,7 @@ class BVHData:
         
         root = self.root
         frameEnd = self.totalFrames - 1
-
-        #set an offset to skip first neutral frame
-        if self.first_frame_neutral:
-            frameOffset = 1
-        else: 
-            frameOffset = 0
+        
         
         jointOrder = []
 
@@ -550,11 +549,11 @@ class BVHData:
 
                 if withJoints and withPos:
                     #We use offset to avoid the first neutral frame 
-                    jointArray[frameIdx][jointIdx] = np.array(currentJoint.transMats)[frameIdx + frameOffset][:][:-1]
+                    jointArray[frameIdx][jointIdx] = np.array(currentJoint.transMats)[frameIdx][:][:-1]
                 elif withJoints:
-                    jointArray[frameIdx][jointIdx] = np.array(currentJoint.transMats)[frameIdx + frameOffset][:-1,:-1]
+                    jointArray[frameIdx][jointIdx] = np.array(currentJoint.transMats)[frameIdx][:-1,:-1]
                 else:
-                    jointArray[frameIdx][jointIdx] = np.array(currentJoint.jointCoords)[frameIdx + frameOffset][:]
+                    jointArray[frameIdx][jointIdx] = np.array(currentJoint.jointCoords)[frameIdx][:]
 
             # read children recursively
             for childJoint in currentJoint.childNodes:
@@ -564,9 +563,231 @@ class BVHData:
         readHierarchyToArray(root) #run recursion to fill jointArray
 
         #return the array of joint transforms and joint name order
+
+        if get_neutral_frame:
+            return jointArray[0]
+
+        jointArray = np.delete(jointArray,0,0) #delete neutral frame from return when 'get_neutral_frame = False'
+
         if withNames:
             return jointArray, jointOrder
         else: return jointArray
+    
+
+    def get_offsets_and_hierarchy(self):
+        #Requires call of bvhRead beforehand
+        offsets = []
+        hierarchy = []
+        joints_visited = 1
+
+        def get_index(node):
+            #Finds the joint index number of a given node(joint) in the read bvh file
+
+            nodeFound = False
+            index = 0
+            currentIndex = 0
+            
+            #Function to do recursion
+            def readHierarchyForIndex(currentNode):
+                nonlocal index
+                nonlocal currentIndex
+                nonlocal nodeFound
+                
+                if nodeFound:
+                    return
+                
+                if currentNode == node:
+                    nodeFound = True
+                    index = currentIndex
+                    return
+                
+                if currentNode.childNodes == []:
+                    return
+                
+                for childNode in currentNode.childNodes:
+                    currentIndex += 1
+                    readHierarchyForIndex(childNode)
+            
+            readHierarchyForIndex(self.root)
+            
+            return index
+
+        def readHierarchyForOffsets(node):
+            offsets.append(node.offset)
+
+            #If end effector
+            if node.childNodes == []:
+                return #escape
+            
+            #Otherwise joint has children
+            for childNode in node.childNodes:
+                readHierarchyForOffsets(childNode)
+            return #finish
+
+        def readHierarchyForChildrenIndices(node):
+            nonlocal hierarchy
+            nonlocal joints_visited
+            
+            if node.childNodes == []:
+                hierarchy.append([])
+                return #escape
+            
+            #get children indices and store in hierarchy
+            childIndices = []
+            for childNode in node.childNodes:
+                childIndices.append(get_index(childNode))
+            hierarchy.append(childIndices)
+
+            #Travel down hierarchy to next joint
+            for childNode in node.childNodes:
+                readHierarchyForChildrenIndices(childNode)
+            
+            return #escape
+        
+        #Run recursions
+        readHierarchyForOffsets(self.root)
+        readHierarchyForChildrenIndices(self.root)
+        
+        return np.array(offsets), hierarchy
+
+
+    
+    def get_pos_from_angs(self, all_joint_angles = np.array([]) , offsets=np.array([]), hierarchy=np.array([]), root_trans=np.array([])):
+    
+        '''
+        Converts from joint angles and root position to joint positions via forward kinematics
+        Works without kwargs after a call of bvhRead
+
+        Kwargs allow custom override: 
+        - all_joint_angles shoudl have shape (frame_num, joint_num 3, 3) being the rotation matrices
+        - offsets should be the joint offsets (as in bvh file) shape (joint_num, 3)
+        - hierarchy should be a list of length joint_num where list[joint_index] contains the list of joint indices
+          of the children of the joint corresponding to joint_index (0 to joint_num-1) in the order of appearance in bvh file
+        - root_trans should have shape (frame_num, 3,4) being the transform including joint angles and root position
+
+        - Outputs joint positions of shape (frame_num, joint_num, 3)
+        '''
+
+        #If flags allowing custom input if needed, otherwise needs bvhRead call to work with no kwargs
+        if all_joint_angles.shape == (0,):
+            joints = self.getJointAngles()
+            all_joint_angles = joints[:,:,:,:3] #get angles
+            root_trans_copy = joints[:,0] #get root 
+        if offsets.shape == (0,):
+            offsets, hierarchy_copy = self.get_offsets_and_hierarchy()
+        if hierarchy.shape == (0,):
+            hierarchy = hierarchy_copy
+        if root_trans.shape == (0,):
+            root_trans = root_trans_copy
+        
+        #correct shape of root_trans
+        rt = np.zeros((root_trans.shape[0],4,4))
+        rt[:,:3,:] = root_trans
+        rt[:,3,3] = 1
+        root_trans = rt 
+
+        #Form transform matrix for the offsets
+        offset_tr = np.zeros((all_joint_angles.shape[1],4,4))
+        offset_tr[:,:3,:3] = np.identity(3)
+        offset_tr[:,:3,3] = offsets
+        offset_tr[:,3,3] = 1
+        
+        frame_num = all_joint_angles.shape[0]
+        joint_num = all_joint_angles.shape[1]
+
+        #Function to build joint positions for one frame of data
+        def pos_from_ang(angles, root_trans):
+            
+            trans = np.zeros((joint_num,4,4)) #initialise positions to be set
+            trans[:,:3,:3] = angles
+            trans[:,3,3] = 1
+            trans[0] = root_trans #set root transform from argument
+            
+            #Function to perform recursion on hierarchy
+            def build_from_joint(base_index):
+                to_build = hierarchy[base_index] #get list of joint indices to build
+                for ind in to_build:
+
+                    trans[ind][:3,3] = np.matmul(trans[base_index],offset_tr[ind])[:3,3] #Only set the position info
+
+                    build_from_joint(ind)
+            
+            build_from_joint(0) #start recursive build
+            
+            return trans[:,:3,3] #return positions as array shape (joint_num, 3)
+        
+        #Run for each frame
+        pos = np.zeros((frame_num,joint_num,3))
+
+        for fr in range(frame_num):
+            pos[fr] = pos_from_ang(all_joint_angles[fr], root_trans[fr])
+
+        return pos
+
+
+    '''
+    #Copy of above function pre changes:
+
+
+    def get_pos_from_angs(self, all_joint_angles = np.array([]) , offsets=np.array([]), hierarchy=np.array([]), root_pos=np.array([])):
+    
+        
+        Converts from joint angles and root position to joint positions via forward kinematics
+        Works without kwargs after a call of bvhRead
+
+        Kwargs allow custom override: 
+        - all_joint_angles shoudl have shape (frame_num, joint_num 3, 3) being the rotation matrices
+        - offsets should be the joint offsets (as in bvh file) shape (joint_num, 3)
+        - hierarchy should be a list of length joint_num where list[joint_index] contains the list of joint indices
+          of the children of the joint corresponding to joint_index (0 to joint_num-1) in the order of appearance in bvh file
+        - root_pos should have shape (frame_num, 3) being the translational positions of the root(/base) joint
+
+        - Outputs joint positions of shape (frame_num, joint_num, 3)
+        
+
+        #If flags allowing custom input if needed, otherwise needs bvhRead call to work with no kwargs
+        if all_joint_angles.shape == (0,):
+            joints = self.getJointAngles()
+            all_joint_angles = joints[:,:,:,:3] #get angles
+            root_pos_copy = joints[:,0,:,3] #get root 
+        if offsets.shape == (0,):
+            offsets, hierarchy_copy = self.get_offsets_and_hierarchy()
+        if hierarchy.shape == (0,):
+            hierarchy = hierarchy_copy
+        if root_pos.shape == (0,):
+            root_pos = root_pos_copy
+        
+        frame_num = all_joint_angles.shape[0]
+        joint_num = all_joint_angles.shape[1]
+
+        #Function to build joint positions for one frame of data
+        def pos_from_ang(angles, root_pos):
+            
+            pos = np.zeros((joint_num,3))
+            pos[0] = root_pos
+            
+            #Function to perform recursion on hierarchy
+            def build_from_joint(base_index):
+                to_build = hierarchy[base_index] #get list of joint indices to build
+                for ind in to_build:
+                    pos[ind] = pos[base_index] + np.matmul(angles[ind],offsets[ind])
+                    build_from_joint(ind)
+            
+            build_from_joint(0) #start recursive build
+            
+            return pos #return positions as array shape (joint_num, 3)
+        
+        #Run for each frame
+        pos = np.zeros((frame_num,joint_num,3))
+
+        for fr in range(frame_num):
+            pos[fr] = pos_from_ang(all_joint_angles[fr], root_pos[fr])
+
+        return pos
+    '''
+    
+        
+        
 
 
 ############## gf321 utils methods #################
@@ -672,6 +893,8 @@ def correct_orientation(joints):
     joints_corrected[:,:,2] = joints[:,:,1]
     
     return joints_corrected
+
+
 
 ###############################################################
 

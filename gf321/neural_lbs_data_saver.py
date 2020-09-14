@@ -10,7 +10,7 @@ from gf321_utils import marker_utils
 
 def main():
 
-    motion_names = ['jump','poles','table','trot','walk'] #edit to change what's included in dataset
+    motion_names = ['jump','poles','table','trot','walk','testSeq'] #edit to change what's included in dataset
     markers = []
     joints = []
 
@@ -22,11 +22,15 @@ def main():
             joints = bvh_class.getJointAngles()
             current_joints = joints
             markers = marker_utils.read_markers('neural_lbs_data/dog1_' + name + '_markers.json')
+            if name == 'testSeq':
+                markers = np.delete(markers,-1,0) #testSeq markers have one too many frames (extra at end) so delete
             current_markers = markers
         else:
             current_joints =bvh_class.getJointAngles()
             joints = np.append(joints, current_joints, axis=0)
             current_markers = marker_utils.read_markers('neural_lbs_data/dog1_' + name + '_markers.json')
+            if name == 'testSeq':
+                current_markers = np.delete(current_markers,-1,0) #testSeq markers have one too many frames (extra at end) so delete
             markers = np.append(markers, current_markers, axis=0)
     
         print('Shape equal: ',current_markers.shape[0]==current_joints.shape[0])

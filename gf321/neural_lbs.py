@@ -99,9 +99,11 @@ class Neural_LBS():
         self.marker_means = self.marker_data.mean(axis=0)
         self.marker_stds = self.marker_data.std(axis=0)
 
+        '''
         #Create masks for safe divison. Only need for joints as markers are position only and do not coincide with root joint
         self.joint_mask_on = np.where(abs(self.joint_stds) < self.tolerance)
         self.joint_mask_off = np.where(abs(self.joint_stds) >= self.tolerance)
+        '''
         #Make normalised data
         self.marker_data_n = np.zeros(self.marker_data.shape)
         self.joint_data_n = np.zeros(self.joint_data.shape)
